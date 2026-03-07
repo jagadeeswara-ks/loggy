@@ -1,1 +1,4 @@
-/target
+target/
+frontend/target/
+*.wasm
+*.toml
