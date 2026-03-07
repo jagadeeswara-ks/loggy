@@ -17,6 +17,14 @@ use tracing::{info, error, warn};
 use crate::db::{LogEntry, MetricEntry};
 
 /// Application state shared across all handlers
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[derive(Default)]
+pub struct PerformanceMetrics {
+    pub logs_ingested: AtomicU64,
+    pub db_insert_time_ms: AtomicU64,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<config::Config>,
@@ -27,6 +35,7 @@ pub struct AppState {
     pub active_stacks: Arc<RwLock<Vec<docker::ComposeStack>>>,
     pub log_sender: broadcast::Sender<LogEntry>,
     pub log_stats_cache: Arc<moka::future::Cache<String, serde_json::Value>>,
+    pub performance: Arc<PerformanceMetrics>,
 }
 
 /// Background task handles for graceful shutdown
@@ -130,7 +139,7 @@ pub async fn init() -> Result<AppState, anyhow::Error> {
     
     Ok(AppState {
         log_stats_cache: Arc::new(moka::future::Cache::builder().time_to_live(std::time::Duration::from_secs(5)).build()),
-
+        performance: Arc::new(PerformanceMetrics::default()),
         config: Arc::new(config),
         db,
         docker_manager,
@@ -213,35 +222,67 @@ async fn stream_container_logs(state: &AppState, container_id: &str) -> Result<(
         }
     });
     
-    // Process logs
-    while let Some(log_entry) = rx.recv().await {
-        // Detect patterns
-        let detected = state.pattern_detector.detect(&log_entry.message);
-        if !detected.is_empty() {
-            // Update pattern count
-            for pattern in detected {
-                state.pattern_detector.record_pattern(pattern);
+    // Process logs in batches
+    let mut batch = Vec::new();
+    let mut last_insert = std::time::Instant::now();
+
+    loop {
+        // Use timeout to force insert even if buffer isn't full
+        let recv_result = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await;
+        
+        match recv_result {
+            Ok(Some(log_entry)) => {
+                // Detect patterns
+                let detected = state.pattern_detector.detect(&log_entry.message);
+                if !detected.is_empty() {
+                    for pattern in detected {
+                        state.pattern_detector.record_pattern(pattern);
+                    }
+                }
+
+                // Check alerts
+                {
+                    let mut alert_manager = state.alert_manager.write().await;
+                    if let Some(event) = alert_manager.check_pattern_alert(&log_entry.message, &log_entry.container_id) {
+                        info!("Alert triggered: {}", event.message);
+                    }
+                }
+
+                // Broadcast to WebSocket subscribers
+                let _ = state.log_sender.send(log_entry.clone());
+
+                batch.push(log_entry);
             }
-        }
-        
-        // Check alerts
-        {
-            let mut alert_manager = state.alert_manager.write().await;
-            if let Some(event) = alert_manager.check_pattern_alert(&log_entry.message, &log_entry.container_id) {
-                info!("Alert triggered: {}", event.message);
+            Ok(None) => {
+                // Channel closed, insert any remaining logs
+                if !batch.is_empty() {
+                    let start = std::time::Instant::now();
+                    let batch_len = batch.len() as u64;
+                    if let Err(e) = state.db.insert_logs(&batch).await {
+                        warn!("Failed to insert final log batch: {}", e);
+                    } else {
+                        state.performance.logs_ingested.fetch_add(batch_len, Ordering::Relaxed);
+                        state.performance.db_insert_time_ms.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+                    }
+                }
+                break;
             }
+            Err(_) => {} // Timeout, proceed to check batch size
         }
         
-        // Insert into database
-        if let Err(e) = state.db.insert_log(&log_entry).await {
-            warn!("Failed to insert log: {}", e);
-        } else {
-            info!("Log inserted: {} - {}", log_entry.container_name, &log_entry.message[..log_entry.message.len().min(50)]);
-        }
-        
-        // Broadcast to WebSocket subscribers
-        if state.log_sender.send(log_entry).is_err() {
-            // No subscribers, that's fine
+        if batch.len() >= 100 || (!batch.is_empty() && last_insert.elapsed() >= Duration::from_secs(2)) {
+            let start = std::time::Instant::now();
+            let batch_len = batch.len() as u64;
+
+            if let Err(e) = state.db.insert_logs(&batch).await {
+                warn!("Failed to insert log batch: {}", e);
+            } else {
+                state.performance.logs_ingested.fetch_add(batch_len, Ordering::Relaxed);
+                state.performance.db_insert_time_ms.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+            }
+
+            batch.clear();
+            last_insert = std::time::Instant::now();
         }
     }
     

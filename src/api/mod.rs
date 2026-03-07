@@ -43,6 +43,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/metrics", get(query_metrics))
         .route("/api/patterns", get(get_patterns))
         .route("/api/auth/status", get(auth_status))
+        .route("/api/internal/performance", get(get_performance))
         // WebSocket endpoint for real-time logs
         .route("/ws/logs", get(ws_logs_handler));
     
@@ -351,22 +352,13 @@ async fn query_logs(
         container_filter.as_deref(),
         params.level.as_deref(),
         params.search.as_deref(),
+        params.stack.as_deref(),
+        params.containers.as_deref(),
         limit,
         offset,
     ).await {
         Ok(result) => {
-            // Filter by stack if specified
-            let mut logs = result.logs;
-            if let Some(ref stack) = params.stack {
-                logs.retain(|l| l.compose_project == *stack);
-            }
-            
-            // Filter by multiple containers if specified
-            if let Some(ref containers) = params.containers {
-                let container_ids: Vec<&str> = containers.split(',').collect();
-                logs.retain(|l| container_ids.contains(&l.container_id.as_str()));
-            }
-            
+            let logs = result.logs;
             let next_cursor = if logs.len() as u64 >= limit {
                 Some(format!("offset:{}", offset + limit))
             } else {
@@ -430,38 +422,9 @@ async fn log_stats(
 
 
 
-    // Query all logs with filters
-    let stats_result = state.db.query_logs(
-        params.container_id.as_deref(),
-        None,  // level - get all
-        None,  // search - get all
-        10000, // large limit to count
-        0,
-    ).await;
-    
-    match stats_result {
-        Ok(result) => {
-            let mut logs = result.logs;
-            
-            // Filter by stack if specified
-            if let Some(ref stack) = params.stack {
-                logs.retain(|l| l.compose_project == *stack);
-            }
-            
-            let total = logs.len() as u64;
-            let error_count = logs.iter().filter(|l| l.level == crate::db::LogLevel::Error).count() as u64;
-            let warn_count = logs.iter().filter(|l| l.level == crate::db::LogLevel::Warn).count() as u64;
-            let info_count = logs.iter().filter(|l| l.level == crate::db::LogLevel::Info).count() as u64;
-            let debug_count = logs.iter().filter(|l| l.level == crate::db::LogLevel::Debug).count() as u64;
-            
-            // Count per container
-            use std::collections::HashMap;
-            let mut container_counts: HashMap<String, (String, u64)> = HashMap::new();
-            for log in &logs {
-                let entry = container_counts.entry(log.container_id.clone()).or_insert((log.container_name.clone(), 0));
-                entry.1 += 1;
-            }
-            
+    // Query aggregations directly in database
+    match state.db.get_log_stats(params.container_id.as_deref(), params.stack.as_deref()).await {
+        Ok((total, error_count, warn_count, info_count, debug_count, container_counts)) => {
             let containers: Vec<ContainerLogCount> = container_counts.into_iter()
                 .map(|(id, (name, count))| ContainerLogCount {
                     container_id: id,
@@ -478,7 +441,8 @@ async fn log_stats(
                 debug_count,
                 containers,
             };
-            let json_value = serde_json::to_value(response).unwrap();
+
+            let json_value = serde_json::to_value(response).unwrap_or_default();
             state.log_stats_cache.insert(cache_key, json_value.clone()).await;
             Ok(Json(json_value))
         }
@@ -736,4 +700,21 @@ mod tests {
         
         assert_eq!(response.detected_count, 0);
     }
+}
+
+#[derive(serde::Serialize)]
+struct PerformanceResponse {
+    logs_ingested_total: u64,
+    last_db_insert_latency_ms: u64,
+}
+
+async fn get_performance(State(state): State<AppState>) -> Result<Json<PerformanceResponse>, Json<String>> {
+    if let Err(e) = require_auth(&state).await {
+        return Err(Json(e));
+    }
+
+    Ok(Json(PerformanceResponse {
+        logs_ingested_total: state.performance.logs_ingested.load(std::sync::atomic::Ordering::Relaxed),
+        last_db_insert_latency_ms: state.performance.db_insert_time_ms.load(std::sync::atomic::Ordering::Relaxed),
+    }))
 }

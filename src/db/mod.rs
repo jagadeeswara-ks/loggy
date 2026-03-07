@@ -200,6 +200,19 @@ impl Database {
         Ok(())
     }
     
+
+    pub async fn insert_logs(&self, entries: &[LogEntry]) -> Result<(), anyhow::Error> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        let mut inserter = self.client.insert("loggy.logs")?;
+        for entry in entries {
+            inserter.write(entry).await.map_err(|e| anyhow::anyhow!("Write failed: {}", e))?;
+        }
+        inserter.end().await.map_err(|e| anyhow::anyhow!("Insert failed: {}", e))?;
+        Ok(())
+    }
     pub async fn insert_log(&self, entry: &LogEntry) -> Result<(), anyhow::Error> {
         let mut inserter = self.client.insert("loggy.logs")?;
         inserter.write(entry).await.map_err(|e| anyhow::anyhow!("Write failed: {}", e))?;
@@ -212,6 +225,8 @@ impl Database {
         container_id: Option<&str>,
         level: Option<&str>,
         search: Option<&str>,
+        stack: Option<&str>,
+        containers: Option<&str>,
         limit: u64,
         offset: u64,
     ) -> Result<LogQueryResult, anyhow::Error> {
@@ -219,7 +234,19 @@ impl Database {
         
         // Build dynamic query with filters
         if let Some(cid) = container_id {
-            query.push_str(&format!(" AND container_id = '{}'", cid));
+            query.push_str(&format!(" AND container_id = '{}'", cid.replace('\'', "''")));
+        }
+
+        if let Some(s) = stack {
+            query.push_str(&format!(" AND compose_project = '{}'", s.replace('\'', "''")));
+        }
+
+        if let Some(c) = containers {
+            let ids: Vec<&str> = c.split(',').collect();
+            if !ids.is_empty() {
+                let ids_str = ids.iter().map(|id| format!("'{}'", id.replace('\'', "''"))).collect::<Vec<_>>().join(",");
+                query.push_str(&format!(" AND container_id IN ({})", ids_str));
+            }
         }
         
         if let Some(lvl) = level {
@@ -265,6 +292,54 @@ impl Database {
         }
     }
     
+
+    pub async fn get_log_stats(
+        &self,
+        container_id: Option<&str>,
+        stack: Option<&str>,
+    ) -> Result<(u64, u64, u64, u64, u64, std::collections::HashMap<String, (String, u64)>), anyhow::Error> {
+        let mut base_query = String::from("FROM loggy.logs WHERE 1=1");
+
+        if let Some(cid) = container_id {
+            base_query.push_str(&format!(" AND container_id = '{}'", cid.replace('\'', "''")));
+        }
+
+        if let Some(s) = stack {
+            base_query.push_str(&format!(" AND compose_project = '{}'", s.replace('\'', "''")));
+        }
+
+        // Let's execute some aggregation queries natively in ClickHouse
+        let count_query = format!("SELECT count() {}", base_query);
+        let count: u64 = self.client.query(&count_query).fetch_one().await?;
+
+        let level_query = format!("SELECT level, count() {} GROUP BY level", base_query);
+        let mut level_cursor = self.client.query(&level_query).fetch::<(String, u64)>()?;
+
+        let mut error_count = 0;
+        let mut warn_count = 0;
+        let mut info_count = 0;
+        let mut debug_count = 0;
+
+        while let Some((level, c)) = level_cursor.next().await? {
+            match level.to_uppercase().as_str() {
+                "ERROR" | "FATAL" | "CRITICAL" | "ERR" => error_count += c,
+                "WARN" | "WARNING" => warn_count += c,
+                "INFO" => info_count += c,
+                "DEBUG" => debug_count += c,
+                _ => {}
+            }
+        }
+
+        let container_query = format!("SELECT container_id, container_name, count() {} GROUP BY container_id, container_name", base_query);
+        let mut container_cursor = self.client.query(&container_query).fetch::<(String, String, u64)>()?;
+
+        let mut container_counts = std::collections::HashMap::new();
+        while let Some((id, name, c)) = container_cursor.next().await? {
+            container_counts.insert(id, (name, c));
+        }
+
+        Ok((count, error_count, warn_count, info_count, debug_count, container_counts))
+    }
     pub async fn get_metrics(
         &self,
         container_id: Option<&str>,
