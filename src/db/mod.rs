@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::config::DatabaseConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(clickhouse::Row)]
 pub struct LogEntry {
     pub id: Option<u64>,
     pub timestamp: DateTime<Utc>,
@@ -79,6 +80,7 @@ impl LogSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(clickhouse::Row)]
 pub struct MetricEntry {
     pub id: Option<u64>,
     pub timestamp: DateTime<Utc>,
@@ -199,28 +201,9 @@ impl Database {
     }
     
     pub async fn insert_log(&self, entry: &LogEntry) -> Result<(), anyhow::Error> {
-        let level_str = entry.level.as_str();
-        let source_str = entry.source.as_str();
-        
-        // Use direct query with proper escaping
-        let query = format!(
-            "INSERT INTO loggy.logs (id, timestamp, container_id, container_name, compose_project, compose_file, message, level, source, metadata) VALUES (0, toDateTime64('{}', 3), '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}')",
-            entry.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-            entry.container_id,
-            entry.container_name,
-            entry.compose_project,
-            entry.compose_file,
-            entry.message.replace('\'', "\\'"),
-            level_str,
-            source_str,
-            entry.metadata.as_deref().unwrap_or("")
-        );
-        
-        self.client.query(&query)
-            .execute()
-            .await
-            .map_err(|e| anyhow::anyhow!("Insert failed: {}", e))?;
-        
+        let mut inserter = self.client.insert("loggy.logs")?;
+        inserter.write(entry).await.map_err(|e| anyhow::anyhow!("Write failed: {}", e))?;
+        inserter.end().await.map_err(|e| anyhow::anyhow!("Insert failed: {}", e))?;
         Ok(())
     }
     
@@ -301,8 +284,10 @@ impl Database {
         Ok(vec![])
     }
     
-    pub async fn insert_metric(&self, _entry: &MetricEntry) -> Result<(), anyhow::Error> {
-        // TODO: Implement metric insertion
+    pub async fn insert_metric(&self, entry: &MetricEntry) -> Result<(), anyhow::Error> {
+        let mut inserter = self.client.insert("loggy.metrics")?;
+        inserter.write(entry).await.map_err(|e| anyhow::anyhow!("Write failed: {}", e))?;
+        inserter.end().await.map_err(|e| anyhow::anyhow!("Insert failed: {}", e))?;
         Ok(())
     }
     

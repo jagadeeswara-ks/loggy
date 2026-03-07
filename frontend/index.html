@@ -188,13 +188,29 @@
         .log-entry.warn { border-left: 3px solid #d29922; }
         .log-entry.info { border-left: 3px solid #58a6ff; }
         .log-entry.debug { border-left: 3px solid #8b949e; }
+        .log-actions { opacity: 0; transition: opacity 0.2s; margin-left: auto; display: flex; align-items: center; }
+        .log-entry:hover .log-actions { opacity: 1; }
+        .copy-btn { background: none; border: none; color: #8b949e; cursor: pointer; padding: 2px 5px; font-size: 0.8rem; }
+        .copy-btn:hover { color: #c9d1d9; }
         .log-time { color: #6e7681; min-width: 150px; font-size: 0.75rem; }
         .log-container-name { color: #7ee787; min-width: 100px; font-size: 0.75rem; }
         .log-level { min-width: 50px; font-weight: 600; font-size: 0.7rem; }
         .log-entry.error .log-level { color: #f85149; }
         .log-entry.warn .log-level { color: #d29922; }
         .log-entry.info .log-level { color: #58a6ff; }
-        .log-message { flex: 1; word-break: break-word; }
+        .log-message { flex: 1; word-break: break-word; overflow: hidden; }
+        .log-message pre { margin: 0; white-space: pre-wrap; font-family: inherit; }
+        .log-message.collapsed { max-height: 4.5em; cursor: pointer; position: relative; }
+        .log-message.collapsed::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 1.5em;
+            background: linear-gradient(transparent, #161b22);
+        }
+        .log-entry:hover .log-message.collapsed::after {
+            background: linear-gradient(transparent, #161b22);
+        }
         
         /* WebSocket Status */
         .ws-indicator {
@@ -518,7 +534,7 @@
             ws.onmessage = (event) => {
                 try {
                     const log = JSON.parse(event.data);
-                    addLog(log);
+                    queueLog(log);
                 } catch (e) {
                     console.log('Raw log:', event.data);
                 }
@@ -531,7 +547,63 @@
             };
         }
         
-        // Add log to collection and render
+        // Batch log processing
+        let pendingLogs = [];
+        let rAFPending = false;
+
+        function queueLog(log) {
+            pendingLogs.push(log);
+            if (!rAFPending) {
+                rAFPending = true;
+                requestAnimationFrame(processPendingLogs);
+            }
+        }
+
+        function processPendingLogs() {
+            rAFPending = false;
+            if (pendingLogs.length === 0) return;
+
+            const logsToProcess = pendingLogs;
+            pendingLogs = [];
+
+            let added = false;
+
+            for (const log of logsToProcess) {
+                // Filter by selected containers
+                if (selectedContainers.size > 0 && !selectedContainers.has(log.container_id)) {
+                    continue;
+                }
+
+                // Filter by stack
+                if (currentStack && log.compose_project !== currentStack) {
+                    continue;
+                }
+
+                allLogs.unshift(log);
+                added = true;
+            }
+
+            if (added) {
+                // Check if we are scrolled to top (or close to it)
+                const isScrolledToTop = logContainer.scrollTop <= 50;
+                const oldHeight = logContainer.scrollHeight;
+
+                // Keep max 5000 logs in memory
+                if (allLogs.length > 5000) {
+                    allLogs = allLogs.slice(0, 5000);
+                }
+
+                filterAndRenderLogs();
+
+                // If we weren't at the top before adding, maintain our scroll position so logs don't jump
+                if (!isScrolledToTop) {
+                    const newHeight = logContainer.scrollHeight;
+                    logContainer.scrollTop += (newHeight - oldHeight);
+                }
+            }
+        }
+
+        // Add log to collection and render (used by historical fetch)
         function addLog(log) {
             // Filter by selected containers
             if (selectedContainers.size > 0 && !selectedContainers.has(log.container_id)) {
@@ -553,8 +625,23 @@
             filterAndRenderLogs();
         }
         
+        let displayLimit = 50;
+
+        // Load more on scroll
+        document.getElementById('log-container').addEventListener('scroll', function() {
+            if (this.scrollTop + this.clientHeight >= this.scrollHeight - 50) {
+                if (displayLimit < allLogs.length) {
+                    displayLimit += 50;
+                    filterAndRenderLogs(true);
+                }
+            }
+        });
+
         // Filter and render logs
-        function filterAndRenderLogs() {
+        function filterAndRenderLogs(isAppend = false) {
+            if (!isAppend) {
+                displayLimit = 50;
+            }
             let filtered = allLogs;
             
             // Filter by level (case-insensitive)
@@ -574,7 +661,7 @@
             }
             
             // Limit display
-            filtered = filtered.slice(0, 500);
+            filtered = filtered.slice(0, displayLimit);
             
             // Render
             if (filtered.length === 0) {
@@ -582,21 +669,35 @@
                 return;
             }
             
-            logContainer.innerHTML = filtered.map(log => {
+            let html = filtered.map(log => {
                 const level = log.level || (log.type === 'connected' ? 'system' : 'info');
                 const time = log.timestamp ? new Date(log.timestamp).toLocaleString() : '';
                 const name = log.container_name || '';
                 const message = log.message || JSON.stringify(log);
                 
+                const isMultiline = message.includes('\n') || message.length > 200;
+                const messageHtml = isMultiline ? `<pre>${escapeHtml(message)}</pre>` : escapeHtml(message);
+                const clickHandler = isMultiline ? `onclick="this.classList.toggle('collapsed')"` : '';
+                const collapsedClass = isMultiline ? 'collapsed' : '';
+
                 return `
                     <div class="log-entry ${level}">
                         <span class="log-time">${time}</span>
                         <span class="log-container-name">${name}</span>
                         <span class="log-level">${level.toUpperCase()}</span>
-                        <span class="log-message">${escapeHtml(message)}</span>
+                        <span class="log-message ${collapsedClass}" ${clickHandler} title="Click to expand/collapse">${messageHtml}</span>
+                        <div class="log-actions">
+                            <button class="copy-btn" onclick="copyToClipboard(this, \`${escapeHtml(message).replace(/`/g, '\`')}\`)" title="Copy message">📋</button>
+                        </div>
                     </div>
                 `;
             }).join('');
+
+            if (filtered.length < allLogs.length && filtered.length >= displayLimit) {
+                html += '<div class="log-entry"><span class="log-message" style="text-align: center; color: #8b949e; display: block; width: 100%; cursor: pointer;" onclick="displayLimit += 50; filterAndRenderLogs(true);">Load more...</span></div>';
+            }
+
+            logContainer.innerHTML = html;
         }
         
         // Export logs
@@ -649,6 +750,26 @@
             URL.revokeObjectURL(url);
         }
         
+        // Copy to clipboard
+        async function copyToClipboard(btn) {
+            try {
+                // Find the message text by navigating DOM
+                const logEntry = btn.closest('.log-entry');
+                const messageSpan = logEntry.querySelector('.log-message');
+                const text = messageSpan.innerText;
+
+                // Unescape HTML entities before copying
+                const textarea = document.createElement('textarea');
+                textarea.innerHTML = text;
+                await navigator.clipboard.writeText(textarea.value);
+                const oldIcon = btn.textContent;
+                btn.textContent = '✓';
+                setTimeout(() => btn.textContent = oldIcon, 2000);
+            } catch (err) {
+                console.error('Failed to copy: ', err);
+            }
+        }
+
         // Utility: Escape HTML
         function escapeHtml(text) {
             const div = document.createElement('div');

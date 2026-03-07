@@ -416,11 +416,20 @@ struct LogStatsParams {
 async fn log_stats(
     State(state): State<AppState>,
     params: axum::extract::Query<LogStatsParams>
-) -> Result<Json<LogStatsResponse>, Json<String>> {
+) -> Result<Json<serde_json::Value>, Json<String>> {
     if let Err(e) = require_auth(&state).await {
         return Err(Json(e));
     }
     
+    // Generate cache key based on params
+    let cache_key = format!("stack:{:?}_container:{:?}", params.stack, params.container_id);
+
+    if let Some(cached) = state.log_stats_cache.get(&cache_key).await {
+        return Ok(Json(cached));
+    }
+
+
+
     // Query all logs with filters
     let stats_result = state.db.query_logs(
         params.container_id.as_deref(),
@@ -461,14 +470,17 @@ async fn log_stats(
                 })
                 .collect();
             
-            Ok(Json(LogStatsResponse {
+            let response = LogStatsResponse {
                 total,
                 error_count,
                 warn_count,
                 info_count,
                 debug_count,
                 containers,
-            }))
+            };
+            let json_value = serde_json::to_value(response).unwrap();
+            state.log_stats_cache.insert(cache_key, json_value.clone()).await;
+            Ok(Json(json_value))
         }
         Err(e) => {
             error!("Failed to get log stats: {}", e);
@@ -645,6 +657,8 @@ mod tests {
     #[test]
     fn test_log_query_params_empty() {
         let params = LogQueryParams {
+            stack: None,
+            containers: None,
             container_id: None,
             level: None,
             search: None,
@@ -658,6 +672,8 @@ mod tests {
     #[test]
     fn test_log_query_validation_valid() {
         let params = LogQueryParams {
+            stack: None,
+            containers: None,
             container_id: Some("abc-123".to_string()),
             level: Some("error".to_string()),
             search: None,
@@ -671,6 +687,8 @@ mod tests {
     #[test]
     fn test_log_query_validation_invalid_container() {
         let params = LogQueryParams {
+            stack: None,
+            containers: None,
             container_id: Some("abc; DROP TABLE".to_string()),
             level: None,
             search: None,
@@ -684,6 +702,8 @@ mod tests {
     #[test]
     fn test_log_query_validation_limit_too_high() {
         let params = LogQueryParams {
+            stack: None,
+            containers: None,
             container_id: None,
             level: None,
             search: None,

@@ -26,6 +26,7 @@ pub struct AppState {
     pub alert_manager: Arc<RwLock<alerts::AlertManager>>,
     pub active_stacks: Arc<RwLock<Vec<docker::ComposeStack>>>,
     pub log_sender: broadcast::Sender<LogEntry>,
+    pub log_stats_cache: Arc<moka::future::Cache<String, serde_json::Value>>,
 }
 
 /// Background task handles for graceful shutdown
@@ -128,6 +129,8 @@ pub async fn init() -> Result<AppState, anyhow::Error> {
     info!("Log broadcast channel initialized (capacity: {})", buffer_size);
     
     Ok(AppState {
+        log_stats_cache: Arc::new(moka::future::Cache::builder().time_to_live(std::time::Duration::from_secs(5)).build()),
+
         config: Arc::new(config),
         db,
         docker_manager,
