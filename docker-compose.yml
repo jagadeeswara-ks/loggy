@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: loggy-clickhouse
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    environment:
+      - CLICKHOUSE_DB=loggy
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  loggy:
+    image: ubuntu:22.04
+    container_name: loggy
+    ports:
+      - "8080:8080"
+    environment:
+      # Server
+      - LOGGY_HOST=0.0.0.0
+      - LOGGY_PORT=8080
+      - LOGGY_SERVER__WORKERS=2
+      
+      - LOGGY_DATABASE__PASSWORD=
+      - LOGGY_DATABASE__HOST=clickhouse
+      - LOGGY_DATABASE__PORT=8123
+      - LOGGY_DATABASE__DATABASE=loggy
+      - LOGGY_DATABASE__MAX_CONNECTIONS=10
+      
+      # Docker
+      - LOGGY_DOCKER__SOCKET_PATH=/var/run/docker.sock
+      - LOGGY_DOCKER__POLL_INTERVAL_MS=1000
+      
+      # Authentication (disable for development, enable for production)
+      - LOGGY_AUTH__ENABLED=false
+      # - LOGGY_AUTH__API_KEYS=key1,key2,key3
+      
+      # CORS (restrict in production)
+      - LOGGY_CORS__ALLOWED_ORIGINS=*
+      # Production example:
+      # - LOGGY_CORS__ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+      # - LOGGY_CORS__ALLOWED_METHODS=GET,POST,PUT,DELETE
+      # - LOGGY_CORS__ALLOW_CREDENTIALS=true
+      
+      # Background tasks
+      - LOGGY_BACKGROUND__ENABLE_LOG_STREAMING=true
+      - LOGGY_BACKGROUND__ENABLE_METRICS_COLLECTION=true
+      - LOGGY_BACKGROUND__LOG_INTERVAL_MS=5000
+      - LOGGY_BACKGROUND__METRICS_INTERVAL_MS=10000
+      - LOGGY_BACKGROUND__LOG_BUFFER_SIZE=10000
+    volumes:
+      - ./target/release/loggy:/app/loggy:ro
+      - ./frontend:/app/frontend:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    entrypoint: ["/app/loggy"]
+    working_dir: /app
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+volumes:
+  clickhouse_data:
