@@ -219,7 +219,7 @@ impl DockerManager {
     pub async fn stream_container_logs(
         &self,
         container_id: &str,
-        tx: mpsc::Sender<LogEntry>,
+        tx: mpsc::Sender<std::sync::Arc<LogEntry>>,
     ) -> Result<(), anyhow::Error> {
         info!("Streaming logs from container: {}", container_id);
         
@@ -260,7 +260,7 @@ impl DockerManager {
                     let (level, source) = self.parse_log_level(&message);
                     
                     let entry = LogEntry {
-                        id: None,
+                        id: 0,
                         timestamp: Utc::now(),
                         container_id: container_id.to_string(),
                         container_name: container_name.clone(),
@@ -269,10 +269,10 @@ impl DockerManager {
                         message: message.clone(),
                         level,
                         source,
-                        metadata: None,
+                        metadata: String::new(),
                     };
                     
-                    if tx.send(entry).await.is_err() {
+                    if tx.send(std::sync::Arc::new(entry)).await.is_err() {
                         break;
                     }
                 }

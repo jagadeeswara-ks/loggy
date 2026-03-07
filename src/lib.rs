@@ -33,7 +33,7 @@ pub struct AppState {
     pub pattern_detector: Arc<patterns::PatternDetector>,
     pub alert_manager: Arc<RwLock<alerts::AlertManager>>,
     pub active_stacks: Arc<RwLock<Vec<docker::ComposeStack>>>,
-    pub log_sender: broadcast::Sender<LogEntry>,
+    pub log_sender: broadcast::Sender<std::sync::Arc<LogEntry>>,
     pub log_stats_cache: Arc<moka::future::Cache<String, serde_json::Value>>,
     pub performance: Arc<PerformanceMetrics>,
 }
@@ -210,7 +210,7 @@ async fn start_log_streamer(state: AppState) {
 async fn stream_container_logs(state: &AppState, container_id: &str) -> Result<(), anyhow::Error> {
     use tokio::sync::mpsc;
     
-    let (tx, mut rx) = mpsc::channel::<LogEntry>(100);
+    let (tx, mut rx) = mpsc::channel::<std::sync::Arc<LogEntry>>(10000);
     let container_id = container_id.to_string();
     
     // Start streaming in background
@@ -258,7 +258,7 @@ async fn stream_container_logs(state: &AppState, container_id: &str) -> Result<(
                 if !batch.is_empty() {
                     let start = std::time::Instant::now();
                     let batch_len = batch.len() as u64;
-                    if let Err(e) = state.db.insert_logs(&batch).await {
+                    if let Err(e) = state.db.insert_logs_arc(&batch).await {
                         warn!("Failed to insert final log batch: {}", e);
                     } else {
                         state.performance.logs_ingested.fetch_add(batch_len, Ordering::Relaxed);
@@ -274,7 +274,7 @@ async fn stream_container_logs(state: &AppState, container_id: &str) -> Result<(
             let start = std::time::Instant::now();
             let batch_len = batch.len() as u64;
 
-            if let Err(e) = state.db.insert_logs(&batch).await {
+            if let Err(e) = state.db.insert_logs_arc(&batch).await {
                 warn!("Failed to insert log batch: {}", e);
             } else {
                 state.performance.logs_ingested.fetch_add(batch_len, Ordering::Relaxed);
@@ -309,7 +309,7 @@ async fn start_metrics_collector(state: AppState) {
             match state.docker_manager.get_container_stats(&container.id).await {
                 Ok(stats) => {
                     let metric = MetricEntry {
-                        id: None,
+                        id: 0,
                         timestamp: chrono::Utc::now(),
                         container_id: stats.container_id,
                         container_name: stats.container_name,

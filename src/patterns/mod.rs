@@ -22,6 +22,16 @@ lazy_static! {
     
     // JSON parse errors
     static ref JSON_ERROR: Regex = Regex::new(r"(?i)(json\.parse|invalid\s*json|unexpected\s*token)").unwrap();
+
+    // Fast path matcher
+    static ref DETECTOR_SET: regex::RegexSet = regex::RegexSet::new(&[
+        r"(?i)\b(error|err|fatal|critical|exception)\b",
+        r"(?i)\b(warn|warning)\b",
+        r"(?i)(exception|traceback|stack\s*trace)",
+        r"HTTP/[\d.]+\s+([45]\d{2})",
+        r"(?i)(sql\s*error|database\s*error|deadlock|timeout)",
+        r"(?i)(json\.parse|invalid\s*json|unexpected\s*token)"
+    ]).unwrap();
 }
 
 #[allow(dead_code)]
@@ -66,25 +76,18 @@ impl PatternDetector {
     pub fn detect(&self, message: &str) -> Vec<String> {
         let mut detected = Vec::new();
         
-        if ERROR_PATTERN.is_match(message) {
-            detected.push("error".to_string());
-        }
-        if WARN_PATTERN.is_match(message) {
-            detected.push("warning".to_string());
-        }
-        if STACK_TRACE_START.is_match(message) {
-            detected.push("stack_trace".to_string());
-        }
-        if HTTP_ERROR.is_match(message) {
-            detected.push("http_error".to_string());
-        }
-        if SQL_ERROR.is_match(message) {
-            detected.push("sql_error".to_string());
-        }
-        if JSON_ERROR.is_match(message) {
-            detected.push("json_error".to_string());
+        let matches = DETECTOR_SET.matches(message);
+        if !matches.matched_any() {
+            return detected;
         }
         
+        if matches.matched(0) { detected.push("error".to_string()); }
+        if matches.matched(1) { detected.push("warning".to_string()); }
+        if matches.matched(2) { detected.push("stack_trace".to_string()); }
+        if matches.matched(3) { detected.push("http_error".to_string()); }
+        if matches.matched(4) { detected.push("sql_error".to_string()); }
+        if matches.matched(5) { detected.push("json_error".to_string()); }
+
         detected
     }
     

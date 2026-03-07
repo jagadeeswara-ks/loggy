@@ -593,7 +593,8 @@
                     allLogs = allLogs.slice(0, 5000);
                 }
 
-                filterAndRenderLogs();
+                // Pass true so we don't reset displayLimit to 50 and break user scrolling
+                filterAndRenderLogs(true);
 
                 // If we weren't at the top before adding, maintain our scroll position so logs don't jump
                 if (!isScrolledToTop) {
@@ -687,7 +688,7 @@
                         <span class="log-level">${level.toUpperCase()}</span>
                         <span class="log-message ${collapsedClass}" ${clickHandler} title="Click to expand/collapse">${messageHtml}</span>
                         <div class="log-actions">
-                            <button class="copy-btn" onclick="copyToClipboard(this, \`${escapeHtml(message).replace(/`/g, '\`')}\`)" title="Copy message">📋</button>
+                            <button class="copy-btn" onclick="copyToClipboard(this)" title="Copy message">📋</button>
                         </div>
                     </div>
                 `;

@@ -548,7 +548,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     // Forward logs to client
     let send_task = async {
         while let Ok(log) = rx.recv().await {
-            let json = serde_json::to_string(&log).unwrap_or_default();
+            let json = serde_json::to_string(log.as_ref()).unwrap_or_default();
             if sender.send(Message::Text(json.into())).await.is_err() {
                 break;
             }

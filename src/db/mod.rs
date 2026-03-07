@@ -4,6 +4,29 @@ use clickhouse::Client;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use tracing::{info, warn};
+
+pub mod chrono_datetime64_millis {
+    use chrono::{DateTime, Utc, TimeZone};
+    use serde::{Serializer, Deserializer, Deserialize};
+
+    pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i64(dt.timestamp_millis())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let millis = i64::deserialize(deserializer)?;
+        Utc.timestamp_millis_opt(millis)
+            .single()
+            .ok_or_else(|| serde::de::Error::custom("invalid timestamp"))
+    }
+}
+
 use std::sync::Arc;
 
 use crate::config::DatabaseConfig;
@@ -11,7 +34,8 @@ use crate::config::DatabaseConfig;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(clickhouse::Row)]
 pub struct LogEntry {
-    pub id: Option<u64>,
+    pub id: u64,
+    #[serde(with = "chrono_datetime64_millis")]
     pub timestamp: DateTime<Utc>,
     pub container_id: String,
     pub container_name: String,
@@ -20,7 +44,7 @@ pub struct LogEntry {
     pub message: String,
     pub level: LogLevel,
     pub source: LogSource,
-    pub metadata: Option<String>,
+    pub metadata: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -82,7 +106,8 @@ impl LogSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(clickhouse::Row)]
 pub struct MetricEntry {
-    pub id: Option<u64>,
+    pub id: u64,
+    #[serde(with = "chrono_datetime64_millis")]
     pub timestamp: DateTime<Utc>,
     pub container_id: String,
     pub container_name: String,
@@ -200,6 +225,20 @@ impl Database {
         Ok(())
     }
     
+
+
+    pub async fn insert_logs_arc(&self, entries: &[std::sync::Arc<LogEntry>]) -> Result<(), anyhow::Error> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        let mut inserter = self.client.insert("loggy.logs")?;
+        for entry in entries {
+            inserter.write(entry.as_ref()).await.map_err(|e| anyhow::anyhow!("Write failed: {}", e))?;
+        }
+        inserter.end().await.map_err(|e| anyhow::anyhow!("Insert failed: {}", e))?;
+        Ok(())
+    }
 
     pub async fn insert_logs(&self, entries: &[LogEntry]) -> Result<(), anyhow::Error> {
         if entries.is_empty() {
@@ -431,7 +470,7 @@ mod tests {
     #[test]
     fn test_log_entry_creation() {
         let entry = LogEntry {
-            id: Some(1),
+            id: 1,
             timestamp: chrono::Utc::now(),
             container_id: "abc123".to_string(),
             container_name: "nginx".to_string(),
@@ -440,10 +479,10 @@ mod tests {
             message: "Server started".to_string(),
             level: LogLevel::Info,
             source: LogSource::Stdout,
-            metadata: None,
+            metadata: "".to_string(),
         };
         
-        assert_eq!(entry.id, Some(1));
+        assert_eq!(entry.id, 1);
         assert_eq!(entry.container_id, "abc123");
         assert_eq!(entry.level, LogLevel::Info);
     }
@@ -451,7 +490,7 @@ mod tests {
     #[test]
     fn test_log_entry_with_metadata() {
         let entry = LogEntry {
-            id: None,
+            id: 0,
             timestamp: chrono::Utc::now(),
             container_id: "test".to_string(),
             container_name: "test".to_string(),
@@ -460,18 +499,18 @@ mod tests {
             message: "Error occurred".to_string(),
             level: LogLevel::Error,
             source: LogSource::Stderr,
-            metadata: Some(r#"{"key": "value"}"#.to_string()),
+            metadata: r#"{"key": "value"}"#.to_string(),
         };
         
-        assert!(entry.id.is_none());
-        assert!(entry.metadata.is_some());
+        assert_eq!(entry.id, 0);
+        assert_eq!(entry.metadata, r#"{"key": "value"}"#);
     }
 
     // MetricEntry tests
     #[test]
     fn test_metric_entry_creation() {
         let entry = MetricEntry {
-            id: Some(1),
+            id: 1,
             timestamp: chrono::Utc::now(),
             container_id: "abc123".to_string(),
             container_name: "nginx".to_string(),
@@ -505,7 +544,7 @@ mod tests {
     #[test]
     fn test_log_query_result_with_data() {
         let entry = LogEntry {
-            id: Some(1),
+            id: 1,
             timestamp: chrono::Utc::now(),
             container_id: "test".to_string(),
             container_name: "test".to_string(),
@@ -514,7 +553,7 @@ mod tests {
             message: "Test".to_string(),
             level: LogLevel::Info,
             source: LogSource::Stdout,
-            metadata: None,
+            metadata: "".to_string(),
         };
         
         let result = LogQueryResult {
@@ -532,7 +571,7 @@ mod tests {
     #[test]
     fn test_log_entry_serialization() {
         let entry = LogEntry {
-            id: Some(1),
+            id: 1,
             timestamp: chrono::Utc::now(),
             container_id: "test".to_string(),
             container_name: "test".to_string(),
@@ -541,7 +580,7 @@ mod tests {
             message: "Test message".to_string(),
             level: LogLevel::Error,
             source: LogSource::Stderr,
-            metadata: None,
+            metadata: "".to_string(),
         };
         
         let json = serde_json::to_string(&entry).unwrap();
@@ -552,7 +591,7 @@ mod tests {
     #[test]
     fn test_metric_entry_serialization() {
         let entry = MetricEntry {
-            id: Some(1),
+            id: 1,
             timestamp: chrono::Utc::now(),
             container_id: "test".to_string(),
             container_name: "test".to_string(),
