@@ -5,6 +5,13 @@ use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use tracing::{info, warn};
 
+#[derive(clickhouse::Row, serde::Deserialize)]
+struct CountRow {
+    #[serde(rename = "count()")]
+    count: u64,
+}
+
+
 pub mod chrono_datetime64_millis {
     use chrono::{DateTime, Utc, TimeZone};
     use serde::{Serializer, Deserializer, Deserialize};
@@ -349,17 +356,27 @@ impl Database {
 
         // Let's execute some aggregation queries natively in ClickHouse
         let count_query = format!("SELECT count() {}", base_query);
-        let count: u64 = self.client.query(&count_query).fetch_one().await?;
+        let count_row: CountRow = self.client.query(&count_query).fetch_one().await?;
+        let count = count_row.count;
 
         let level_query = format!("SELECT level, count() {} GROUP BY level", base_query);
-        let mut level_cursor = self.client.query(&level_query).fetch::<(String, u64)>()?;
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct LevelRow {
+            level: String,
+            #[serde(rename = "count()")]
+            count: u64,
+        }
+
+        let mut level_cursor = self.client.query(&level_query).fetch::<LevelRow>()?;
 
         let mut error_count = 0;
         let mut warn_count = 0;
         let mut info_count = 0;
         let mut debug_count = 0;
 
-        while let Some((level, c)) = level_cursor.next().await? {
+        while let Some(row) = level_cursor.next().await? {
+            let level = row.level;
+            let c = row.count;
             match level.to_uppercase().as_str() {
                 "ERROR" | "FATAL" | "CRITICAL" | "ERR" => error_count += c,
                 "WARN" | "WARNING" => warn_count += c,
@@ -370,11 +387,19 @@ impl Database {
         }
 
         let container_query = format!("SELECT container_id, container_name, count() {} GROUP BY container_id, container_name", base_query);
-        let mut container_cursor = self.client.query(&container_query).fetch::<(String, String, u64)>()?;
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct ContainerRow {
+            container_id: String,
+            container_name: String,
+            #[serde(rename = "count()")]
+            count: u64,
+        }
+
+        let mut container_cursor = self.client.query(&container_query).fetch::<ContainerRow>()?;
 
         let mut container_counts = std::collections::HashMap::new();
-        while let Some((id, name, c)) = container_cursor.next().await? {
-            container_counts.insert(id, (name, c));
+        while let Some(row) = container_cursor.next().await? {
+            container_counts.insert(row.container_id, (row.container_name, row.count));
         }
 
         Ok((count, error_count, warn_count, info_count, debug_count, container_counts))

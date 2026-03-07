@@ -759,10 +759,8 @@
                 const messageSpan = logEntry.querySelector('.log-message');
                 const text = messageSpan.innerText;
 
-                // Unescape HTML entities before copying
-                const textarea = document.createElement('textarea');
-                textarea.innerHTML = text;
-                await navigator.clipboard.writeText(textarea.value);
+                // innerText already returns unescaped text, so we can write directly
+                await navigator.clipboard.writeText(text);
                 const oldIcon = btn.textContent;
                 btn.textContent = '✓';
                 setTimeout(() => btn.textContent = oldIcon, 2000);
