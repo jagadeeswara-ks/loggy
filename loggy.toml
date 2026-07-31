@@ -1,0 +1,33 @@
+# Loggy Configuration
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[discovery]
+paths = [
+    "/home/user/projects",
+    "/opt/docker",
+    "."
+]
+exclude = [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/target/**"
+]
+
+[storage]
+retention_days = 7
+compression = true
+data_dir = "./data"
+
+[clickhouse]
+host = "localhost"
+port = 9000
+database = "loggy"
+username = "default"
+password = ""
+
+[docker]
+socket_path = "/var/run/docker.sock"
+poll_interval_ms = 1000

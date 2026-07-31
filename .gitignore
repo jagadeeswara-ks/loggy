@@ -1,0 +1,14 @@
+# Rust build output — this is what bloated the repo to 193 MB
+target/
+frontend/target/
+
+# wasm-pack output
+pkg/
+frontend/pkg/
+
+# NOTE: do not blanket-ignore *.toml — that would exclude Cargo.toml and loggy.toml
+loggy.local.toml
+*.local.toml
+
+.env
+.DS_Store

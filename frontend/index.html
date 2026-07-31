@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loggy - Docker Observability Platform</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            background: #0d1117; 
+            color: #c9d1d9; 
+            min-height: 100vh;
+        }
+        
+        /* Header */
+        .header {
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .logo { color: #58a6ff; font-size: 1.2rem; font-weight: 600; }
+        .header select, .header input, .header button {
+            padding: 0.5rem;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+        .header button {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .header button:hover { border-color: #58a6ff; }
+        
+        /* Main Layout */
+        .app { display: flex; height: calc(100vh - 60px); }
+        
+        /* Sidebar */
+        .sidebar { 
+            width: 300px; 
+            background: #161b22; 
+            border-right: 1px solid #30363d;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .sidebar-section {
+            padding: 1rem;
+            border-bottom: 1px solid #30363d;
+        }
+        .sidebar-section h3 { 
+            color: #8b949e; 
+            font-size: 0.7rem; 
+            text-transform: uppercase; 
+            margin-bottom: 0.5rem; 
+            letter-spacing: 0.5px;
+        }
+        
+        /* Container List */
+        .container-list { 
+            flex: 1; 
+            overflow-y: auto; 
+            padding: 0.5rem 1rem;
+        }
+        .container-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .container-item:hover { border-color: #58a6ff; }
+        .container-item.selected { border-color: #58a6ff; background: #1c2533; }
+        .container-item input[type="checkbox"] { accent-color: #58a6ff; }
+        .container-info { flex: 1; min-width: 0; }
+        .container-name { font-weight: 500; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .container-image { color: #8b949e; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        /* Status Badge */
+        .status-badge {
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .status-badge.running { background: #238636; color: white; }
+        .status-badge.stopped { background: #da3633; color: white; }
+        
+        /* Main Content */
+        .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* Stats Panel */
+        .stats-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            padding: 1rem;
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+        }
+        .stat-card {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+        }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { color: #8b949e; font-size: 0.75rem; text-transform: uppercase; }
+        .stat-card.errors .stat-value { color: #f85149; }
+        .stat-card.warnings .stat-value { color: #d29922; }
+        .stat-card.info .stat-value { color: #58a6ff; }
+        
+        /* Log Controls */
+        .log-controls {
+            display: flex;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 0.4rem 0.75rem;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #8b949e;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover { border-color: #58a6ff; color: #c9d1d9; }
+        .filter-btn.active { background: #58a6ff; color: white; border-color: #58a6ff; }
+        .log-search {
+            flex: 1;
+            min-width: 150px;
+            padding: 0.4rem 0.75rem;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .export-btn {
+            background: #238636;
+            color: white;
+            border: none;
+            padding: 0.4rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+        .export-btn:hover { background: #2ea043; }
+        
+        /* Log Container */
+        .log-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.5rem 1rem;
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 0.8rem;
+        }
+        .log-entry {
+            padding: 0.4rem 0.5rem;
+            border-bottom: 1px solid #21262d;
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-start;
+            transition: background 0.2s;
+        }
+        .log-entry:hover { background: #161b22; }
+        .log-entry.error { border-left: 3px solid #f85149; }
+        .log-entry.warn { border-left: 3px solid #d29922; }
+        .log-entry.info { border-left: 3px solid #58a6ff; }
+        .log-entry.debug { border-left: 3px solid #8b949e; }
+        .log-time { color: #6e7681; min-width: 150px; font-size: 0.75rem; }
+        .log-container-name { color: #7ee787; min-width: 100px; font-size: 0.75rem; }
+        .log-level { min-width: 50px; font-weight: 600; font-size: 0.7rem; }
+        .log-entry.error .log-level { color: #f85149; }
+        .log-entry.warn .log-level { color: #d29922; }
+        .log-entry.info .log-level { color: #58a6ff; }
+        .log-message { flex: 1; word-break: break-word; }
+        
+        /* WebSocket Status */
+        .ws-indicator {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            background: #21262d;
+            border: 1px solid #30363d;
+        }
+        .ws-indicator.connected { border-color: #238636; color: #238636; }
+        .ws-indicator.disconnected { border-color: #da3633; color: #da3633; }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            color: #8b949e;
+        }
+        
+        /* Container count badge */
+        .container-count {
+            font-size: 0.75rem;
+            color: #8b949e;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <span class="logo">📦 Loggy</span>
+        
+        <select id="stack-selector">
+            <option value="">All Stacks</option>
+        </select>
+        
+        <select id="time-range">
+            <option value="5m">Last 5 minutes</option>
+            <option value="15m">Last 15 minutes</option>
+            <option value="1h" selected>Last 1 hour</option>
+            <option value="24h">Last 24 hours</option>
+            <option value="7d">Last 7 days</option>
+        </select>
+        
+        <span class="container-count" id="selected-count">0 containers selected</span>
+    </header>
+
+    <div class="app">
+        <!-- Sidebar - Container Selection -->
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <h3>Containers</h3>
+                <input type="text" id="container-search" placeholder="Search containers..." 
+                       style="width: 100%; padding: 0.4rem; background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px;">
+            </div>
+            <div class="container-list" id="container-list">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </aside>
+        
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Stats Panel -->
+            <div class="stats-panel">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-label">Total Logs</div>
+                </div>
+                <div class="stat-card errors">
+                    <div class="stat-value" id="stat-errors">0</div>
+                    <div class="stat-label">Errors</div>
+                </div>
+                <div class="stat-card warnings">
+                    <div class="stat-value" id="stat-warnings">0</div>
+                    <div class="stat-label">Warnings</div>
+                </div>
+                <div class="stat-card info">
+                    <div class="stat-value" id="stat-info">0</div>
+                    <div class="stat-label">Info</div>
+                </div>
+            </div>
+            
+            <!-- Log Controls -->
+            <div class="log-controls">
+                <button class="filter-btn active" data-level="all">All</button>
+                <button class="filter-btn" data-level="error">Error</button>
+                <button class="filter-btn" data-level="warn">Warn</button>
+                <button class="filter-btn" data-level="info">Info</button>
+                <button class="filter-btn" data-level="debug">Debug</button>
+                <input type="text" id="log-search" class="log-search" placeholder="Search logs...">
+                <button class="export-btn" onclick="exportLogs('json')">Export JSON</button>
+                <button class="export-btn" onclick="exportLogs('csv')" style="background: #1f6feb;">Export CSV</button>
+            </div>
+            
+            <!-- Log Container -->
+            <div id="log-container" class="log-container">
+                <div class="empty-state">Waiting for logs...</div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- WebSocket Status -->
+    <div id="ws-indicator" class="ws-indicator disconnected">● Disconnected</div>
+
+    <script>
+        // State
+        let currentStack = '';
+        let currentLevel = 'all';
+        let currentLogSearch = '';
+        let selectedContainers = new Set();
+        let allLogs = []; // Store logs for export
+        let ws = null;
+        
+        // DOM Elements
+        const stackSelector = document.getElementById('stack-selector');
+        const containerSearch = document.getElementById('container-search');
+        const containerList = document.getElementById('container-list');
+        const logContainer = document.getElementById('log-container');
+        const logSearch = document.getElementById('log-search');
+        const wsIndicator = document.getElementById('ws-indicator');
+        const selectedCount = document.getElementById('selected-count');
+        
+        // Stats elements
+        const statTotal = document.getElementById('stat-total');
+        const statErrors = document.getElementById('stat-errors');
+        const statWarnings = document.getElementById('stat-warnings');
+        const statInfo = document.getElementById('stat-info');
+        
+        // Initialize
+        async function init() {
+            await loadStacks();
+            await loadContainers();
+            connectWebSocket();
+            loadStats();
+            
+            // Event listeners
+            stackSelector.addEventListener('change', () => {
+                currentStack = stackSelector.value;
+                selectedContainers.clear(); // Clear container selection on stack change
+                loadContainers();
+                loadStats();
+                loadHistoricalLogs(); // Load historical logs when stack changes
+            });
+            
+            containerSearch.addEventListener('input', debounce(loadContainers, 300));
+            
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentLevel = btn.dataset.level;
+                    filterAndRenderLogs();
+                });
+            });
+            
+            logSearch.addEventListener('input', debounce(() => {
+                currentLogSearch = logSearch.value;
+                filterAndRenderLogs();
+            }, 300));
+        }
+        
+        // Load stacks
+        async function loadStacks() {
+            try {
+                const resp = await fetch('/api/stacks/discover');
+                const stacks = await resp.json();
+                
+                stackSelector.innerHTML = '<option value="">All Stacks</option>';
+                stacks.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.name;
+                    opt.textContent = `${s.name} (${s.running_count}/${s.container_count})`;
+                    stackSelector.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Failed to load stacks:', e);
+            }
+        }
+        
+        // Load containers
+        async function loadContainers() {
+            try {
+                let url = '/api/containers?';
+                if (currentStack) url += `stack=${currentStack}&`;
+                const search = containerSearch.value;
+                if (search) url += `search=${search}&`;
+                
+                const resp = await fetch(url);
+                const containers = await resp.json();
+                
+                if (containers.length === 0) {
+                    containerList.innerHTML = '<div class="empty-state">No containers found</div>';
+                    return;
+                }
+                
+                // Auto-select all containers if none selected
+                if (selectedContainers.size === 0) {
+                    containers.forEach(c => selectedContainers.add(c.id));
+                }
+                
+                containerList.innerHTML = containers.map(c => {
+                    const isRunning = c.status.toLowerCase().includes('up');
+                    const isSelected = selectedContainers.has(c.id);
+                    return `
+                        <div class="container-item ${isSelected ? 'selected' : ''}" data-id="${c.id}">
+                            <input type="checkbox" ${isSelected ? 'checked' : ''} 
+                                   onchange="toggleContainer('${c.id}')">
+                            <div class="container-info">
+                                <div class="container-name">${c.name}</div>
+                                <div class="container-image">${c.image}</div>
+                            </div>
+                            <span class="status-badge ${isRunning ? 'running' : 'stopped'}">
+                                ${isRunning ? 'Running' : 'Stopped'}
+                            </span>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error('Failed to load containers:', e);
+            }
+        }
+        
+        // Toggle container selection
+        function toggleContainer(id) {
+            if (selectedContainers.has(id)) {
+                selectedContainers.delete(id);
+            } else {
+                selectedContainers.add(id);
+            }
+            updateSelectedCount();
+            loadContainers(); // Re-render to update styles
+            loadHistoricalLogs(); // Reload logs for selected containers
+        }
+        
+        function updateSelectedCount() {
+            const count = selectedContainers.size;
+            selectedCount.textContent = `${count} container${count !== 1 ? 's' : ''} selected`;
+        }
+        
+        // Load stats
+        async function loadStats() {
+            try {
+                let url = '/api/logs/stats?';
+                if (currentStack) url += `stack=${currentStack}`;
+                
+                const resp = await fetch(url);
+                const stats = await resp.json();
+                
+                statTotal.textContent = formatNumber(stats.total);
+                statErrors.textContent = formatNumber(stats.error_count);
+                statWarnings.textContent = formatNumber(stats.warn_count);
+                statInfo.textContent = formatNumber(stats.info_count);
+            } catch (e) {
+                console.error('Failed to load stats:', e);
+            }
+        }
+        
+        function formatNumber(n) {
+            if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+            return n.toString();
+        }
+        
+        // Load historical logs from database
+        async function loadHistoricalLogs() {
+            try {
+                let url = '/api/logs?limit=500';
+                
+                // Add filters
+                if (currentStack) {
+                    // Need to filter by stack - get containers for stack first
+                    const containersResp = await fetch(`/api/containers?stack=${currentStack}`);
+                    const containers = await containersResp.json();
+                    const containerIds = containers.map(c => c.id).join(',');
+                    if (containerIds) url += `&containers=${containerIds}`;
+                } else if (selectedContainers.size > 0) {
+                    url += `&containers=${Array.from(selectedContainers).join(',')}`;
+                }
+                
+                const resp = await fetch(url);
+                const data = await resp.json();
+                
+                if (data.logs && data.logs.length > 0) {
+                    // Add historical logs to our collection
+                    data.logs.forEach(log => {
+                        // Avoid duplicates
+                        const exists = allLogs.some(l => 
+                            l.timestamp === log.timestamp && 
+                            l.container_id === log.container_id &&
+                            l.message === log.message
+                        );
+                        if (!exists) {
+                            allLogs.push(log);
+                        }
+                    });
+                    
+                    // Sort by timestamp descending
+                    allLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    
+                    filterAndRenderLogs();
+                }
+                
+                // Update stats
+                loadStats();
+            } catch (e) {
+                console.error('Failed to load historical logs:', e);
+            }
+        }
+        
+        // Connect WebSocket
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${location.host}/ws/logs`);
+            
+            ws.onopen = () => {
+                wsIndicator.textContent = '● Connected';
+                wsIndicator.className = 'ws-indicator connected';
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const log = JSON.parse(event.data);
+                    addLog(log);
+                } catch (e) {
+                    console.log('Raw log:', event.data);
+                }
+            };
+            
+            ws.onclose = () => {
+                wsIndicator.textContent = '● Disconnected';
+                wsIndicator.className = 'ws-indicator disconnected';
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+        
+        // Add log to collection and render
+        function addLog(log) {
+            // Filter by selected containers
+            if (selectedContainers.size > 0 && !selectedContainers.has(log.container_id)) {
+                return;
+            }
+            
+            // Filter by stack
+            if (currentStack && log.compose_project !== currentStack) {
+                return;
+            }
+            
+            allLogs.unshift(log);
+            
+            // Keep max 5000 logs in memory
+            if (allLogs.length > 5000) {
+                allLogs = allLogs.slice(0, 5000);
+            }
+            
+            filterAndRenderLogs();
+        }
+        
+        // Filter and render logs
+        function filterAndRenderLogs() {
+            let filtered = allLogs;
+            
+            // Filter by level (case-insensitive)
+            if (currentLevel !== 'all') {
+                filtered = filtered.filter(log => 
+                    log.level && log.level.toLowerCase() === currentLevel.toLowerCase()
+                );
+            }
+            
+            // Filter by search
+            if (currentLogSearch) {
+                const search = currentLogSearch.toLowerCase();
+                filtered = filtered.filter(log => 
+                    (log.message && log.message.toLowerCase().includes(search)) ||
+                    (log.container_name && log.container_name.toLowerCase().includes(search))
+                );
+            }
+            
+            // Limit display
+            filtered = filtered.slice(0, 500);
+            
+            // Render
+            if (filtered.length === 0) {
+                logContainer.innerHTML = '<div class="empty-state">No logs to display</div>';
+                return;
+            }
+            
+            logContainer.innerHTML = filtered.map(log => {
+                const level = log.level || (log.type === 'connected' ? 'system' : 'info');
+                const time = log.timestamp ? new Date(log.timestamp).toLocaleString() : '';
+                const name = log.container_name || '';
+                const message = log.message || JSON.stringify(log);
+                
+                return `
+                    <div class="log-entry ${level}">
+                        <span class="log-time">${time}</span>
+                        <span class="log-container-name">${name}</span>
+                        <span class="log-level">${level.toUpperCase()}</span>
+                        <span class="log-message">${escapeHtml(message)}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Export logs
+        function exportLogs(format) {
+            let filteredLogs = allLogs;
+            
+            // Apply same filters as display
+            if (currentLevel !== 'all') {
+                filteredLogs = filteredLogs.filter(log => 
+                    log.level && log.level.toLowerCase() === currentLevel.toLowerCase()
+                );
+            }
+            
+            if (currentLogSearch) {
+                const search = currentLogSearch.toLowerCase();
+                filteredLogs = filteredLogs.filter(log => 
+                    (log.message && log.message.toLowerCase().includes(search)) ||
+                    (log.container_name && log.container_name.toLowerCase().includes(search))
+                );
+            }
+            
+            let content, filename, type;
+            
+            if (format === 'json') {
+                content = JSON.stringify(filteredLogs, null, 2);
+                filename = `loggy-logs-${Date.now()}.json`;
+                type = 'application/json';
+            } else {
+                // CSV
+                const headers = ['timestamp', 'container_name', 'container_id', 'level', 'message'];
+                const rows = filteredLogs.map(log => [
+                    log.timestamp || '',
+                    log.container_name || '',
+                    log.container_id || '',
+                    log.level || '',
+                    (log.message || '').replace(/"/g, '""')
+                ]);
+                content = [headers.join(','), ...rows.map(r => r.map(v => `"${v}"`).join(','))].join('\n');
+                filename = `loggy-logs-${Date.now()}.csv`;
+                type = 'text/csv';
+            }
+            
+            // Download
+            const blob = new Blob([content], { type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // Utility: Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Utility: Debounce
+        function debounce(fn, ms) {
+            let timeout;
+            return (...args) => {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => fn(...args), ms);
+            };
+        }
+        
+        // Start
+        init();
+    </script>
+</body>
+</html>
