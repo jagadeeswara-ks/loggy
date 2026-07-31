@@ -14,18 +14,17 @@ happened before?*
 | **ClickHouse, not Postgres** | Logs are append-only and queried by time range and level. `MergeTree` partitioned `toYYYYMMDD(timestamp)`, ordered `(container_id, timestamp)` — the sort key matches the query pattern, so range scans stay on one partition |
 | **Classify at ingest, not query** | Regex classification (error / warn / stack trace / HTTP 4xx-5xx / SQL / JSON) runs as lines arrive, so queries filter on an indexed `level` column instead of scanning message text |
 | **Interval tail, not `follow`** | `bollard` with `follow: false` on a timer. Bounded work per tick and no per-container task that can wedge — at the cost of sub-interval latency |
+| **Buffered RowBinary writes** | Rows go through `Inserter`, flushing at 10,000 rows or 5s. Single-row inserts cap throughput far below what MergeTree absorbs, and each is a separate HTTP round trip. Buffers are flushed on shutdown |
+| **No SQL string building anywhere** | Log content is attacker-controlled — any container can emit any bytes — and query filters arrive straight off HTTP params. Writes use RowBinary; reads use bound parameters |
 | **WebSocket push** | The UI subscribes; the server is never polled |
 | **Rust + axum** | Ingest is the hot path and runs at container-log volume |
 
-## Known issues
+## Limitations
 
-Honest list — these are real and unfixed:
-
-- **`insert_log` builds SQL by string interpolation** (`src/db/mod.rs`). Log content goes
-  straight into the query. A log line containing a quote breaks it, and it is an injection
-  surface. Needs parameter binding or the client's row-insert API.
-- **Inserts are one row at a time.** ClickHouse wants batches; single-row inserts cap
-  throughput well below what the storage engine can take. Needs a buffered writer.
+- **`follow: false`** means log latency is bounded by the poll interval, not sub-second.
+- **Metrics are point-in-time samples** on the same interval — not continuous.
+- **7-day TTL** is hardcoded in the table DDL rather than configurable.
+- **No auth on the WebSocket** — the API key check covers REST routes only.
 
 ## Quick start
 

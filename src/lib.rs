@@ -301,7 +301,8 @@ pub async fn run(state: AppState) -> Result<(), anyhow::Error> {
     
     // Clone for shutdown handler
     let tasks_clone = tasks.clone();
-    
+    let db_for_shutdown = state.db.clone();
+
     // Setup graceful shutdown
     let result = axum::serve(listener, api::router(state))
         .with_graceful_shutdown(async move {
@@ -311,13 +312,17 @@ pub async fn run(state: AppState) -> Result<(), anyhow::Error> {
             let mut tasks = tasks_clone.lock().await;
             tasks.stop().await;
             info!("All background tasks stopped");
+            // Writes are buffered — without this, up to MAX_BUFFERED_ROWS are lost on exit.
+            if let Err(e) = db_for_shutdown.flush().await {
+                error!("Failed to flush buffered rows: {}", e);
+            }
         })
         .await;
-    
+
     if let Err(e) = result {
         error!("Server error: {}", e);
     }
-    
+
     Ok(())
 }
 

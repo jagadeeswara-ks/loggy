@@ -642,16 +642,24 @@ mod tests {
         assert!(!response.success);
     }
 
-    #[test]
-    fn test_log_query_params_empty() {
-        let params = LogQueryParams {
+    /// Keeps these tests compiling when new filter fields are added — the four below
+    /// silently rotted when `containers` and `stack` appeared on LogQueryParams.
+    fn params() -> LogQueryParams {
+        LogQueryParams {
             container_id: None,
+            containers: None,
+            stack: None,
             level: None,
             search: None,
             limit: None,
             offset: None,
-        };
-        
+        }
+    }
+
+    #[test]
+    fn test_log_query_params_empty() {
+        let params = params();
+
         assert!(params.container_id.is_none());
     }
 
@@ -660,11 +668,10 @@ mod tests {
         let params = LogQueryParams {
             container_id: Some("abc-123".to_string()),
             level: Some("error".to_string()),
-            search: None,
             limit: Some(100),
-            offset: None,
+            ..params()
         };
-        
+
         assert!(params.validate().is_ok());
     }
 
@@ -672,25 +679,19 @@ mod tests {
     fn test_log_query_validation_invalid_container() {
         let params = LogQueryParams {
             container_id: Some("abc; DROP TABLE".to_string()),
-            level: None,
-            search: None,
-            limit: None,
-            offset: None,
+            ..params()
         };
-        
+
         assert!(params.validate().is_err());
     }
 
     #[test]
     fn test_log_query_validation_limit_too_high() {
         let params = LogQueryParams {
-            container_id: None,
-            level: None,
-            search: None,
             limit: Some(50000),
-            offset: None,
+            ..params()
         };
-        
+
         assert!(params.validate().is_err());
     }
 
