@@ -21,12 +21,14 @@ retention_days = 7
 compression = true
 data_dir = "./data"
 
-[clickhouse]
+# NOTE: section name is [database], matching Config::database — not [clickhouse]
+[database]
 host = "localhost"
 port = 9000
 database = "loggy"
 username = "default"
 password = ""
+max_connections = 10
 
 [docker]
 socket_path = "/var/run/docker.sock"

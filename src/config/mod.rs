@@ -6,6 +6,7 @@ use std::time::Duration;
 use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub server: ServerConfig,
     pub discovery: DiscoveryConfig,
@@ -18,6 +19,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
@@ -35,6 +37,7 @@ impl Default for ServerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DiscoveryConfig {
     pub paths: Vec<String>,
     pub exclude: Vec<String>,
@@ -54,6 +57,7 @@ impl Default for DiscoveryConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct StorageConfig {
     pub retention_days: u32,
     pub compression: bool,
@@ -71,6 +75,7 @@ impl Default for StorageConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DatabaseConfig {
     pub host: String,
     pub port: u16,
@@ -94,6 +99,7 @@ impl Default for DatabaseConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DockerConfig {
     pub socket_path: String,
     pub poll_interval_ms: u64,
@@ -109,6 +115,7 @@ impl Default for DockerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AuthConfig {
     pub enabled: bool,
     pub api_keys: Vec<String>,
@@ -124,6 +131,7 @@ impl Default for AuthConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CorsConfig {
     pub allowed_origins: Vec<String>,
     pub allowed_methods: Vec<String>,
@@ -149,6 +157,7 @@ impl CorsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BackgroundConfig {
     pub log_stream_interval_ms: u64,
     pub metrics_interval_ms: u64,
