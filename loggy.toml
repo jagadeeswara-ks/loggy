@@ -24,7 +24,8 @@ data_dir = "./data"
 # NOTE: section name is [database], matching Config::database — not [clickhouse]
 [database]
 host = "localhost"
-port = 9000
+# 8123 = ClickHouse HTTP port. The client speaks HTTP; 9000 is the native protocol.
+port = 8123
 database = "loggy"
 username = "default"
 password = ""

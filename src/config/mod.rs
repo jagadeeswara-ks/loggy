@@ -89,7 +89,9 @@ impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
             host: "localhost".to_string(),
-            port: 9000,
+            // 8123 is ClickHouse's HTTP port. The client builds http:// URLs, so 9000
+            // (the native TCP protocol) does not work despite being the obvious default.
+            port: 8123,
             database: "loggy".to_string(),
             username: "default".to_string(),
             password: "".to_string(),
@@ -334,7 +336,8 @@ mod tests {
     fn test_database_config_defaults() {
         let config = DatabaseConfig::default();
         assert_eq!(config.host, "localhost");
-        assert_eq!(config.port, 9000);
+        // HTTP port. The client builds http:// URLs, so 9000 (native protocol) is wrong.
+        assert_eq!(config.port, 8123);
         assert_eq!(config.database, "loggy");
         assert_eq!(config.username, "default");
         assert_eq!(config.password, "");
@@ -389,7 +392,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.server.host, "0.0.0.0");
         assert_eq!(config.server.port, 8080);
-        assert_eq!(config.database.port, 9000);
+        assert_eq!(config.database.port, 8123);
         assert!(!config.auth.enabled);
         assert!(config.cors.is_allow_all());
     }

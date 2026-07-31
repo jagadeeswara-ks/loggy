@@ -23,7 +23,10 @@ services:
       retries: 5
 
   loggy:
-    image: ubuntu:22.04
+    # Was `image: ubuntu:22.04` with the host's ./target/release/loggy bind-mounted in,
+    # so `docker-compose up` only worked if you had already run a release build locally
+    # — and only on Linux. Build the image instead; the Dockerfile was never referenced.
+    build: .
     container_name: loggy
     ports:
       - "8080:8080"
@@ -61,11 +64,11 @@ services:
       - LOGGY_BACKGROUND__METRICS_INTERVAL_MS=10000
       - LOGGY_BACKGROUND__LOG_BUFFER_SIZE=10000
     volumes:
-      - ./target/release/loggy:/app/loggy:ro
-      - ./frontend:/app/frontend:ro
+      # Read-only: loggy only lists containers and tails logs, it never controls Docker.
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    entrypoint: ["/app/loggy"]
-    working_dir: /app
+    # Reading the socket needs the host's docker group. Override if yours differs:
+    #   DOCKER_GID=$(stat -c '%g' /var/run/docker.sock) docker compose up -d
+    user: "1000:${DOCKER_GID:-999}"
     depends_on:
       clickhouse:
         condition: service_healthy

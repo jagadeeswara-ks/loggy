@@ -3,7 +3,7 @@
 **Docker log aggregation into a columnar store, with classification at ingest.**
 
 Reads container logs off the Docker socket, classifies each line as it arrives, writes to
-ClickHouse, and pushes matches to a WASM frontend over WebSocket. Built to answer what
+ClickHouse, and pushes matches to the browser over WebSocket. Built to answer what
 `docker logs` can't: *what is happening across every container at once, and has it
 happened before?*
 
@@ -29,7 +29,16 @@ happened before?*
 ## Quick start
 
 ```bash
-docker-compose up -d
+docker compose up -d --build
+```
+
+Brings up ClickHouse and loggy. UI on `http://localhost:8080`, ClickHouse on `:8123`.
+
+The container reads `/var/run/docker.sock` read-only to list containers and tail logs —
+it never controls Docker. If it can't read the socket, set the group explicitly:
+
+```bash
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock) docker compose up -d --build
 ```
 
 ## Access
@@ -52,7 +61,7 @@ docker-compose up -d
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LOGGY_DATABASE__HOST` | `localhost` | ClickHouse host |
-| `LOGGY_DATABASE__PORT` | `9000` | ClickHouse port |
+| `LOGGY_DATABASE__PORT` | `8123` | ClickHouse **HTTP** port (not 9000, the native protocol) |
 | `LOGGY_DATABASE__DATABASE` | `loggy` | Database name |
 | `LOGGY_DATABASE__USERNAME` | `default` | Username |
 | `LOGGY_DATABASE__PASSWORD` | `` | Password |
@@ -158,7 +167,7 @@ docker-compose build
 |-----------|------------|
 | Backend | Rust + Axum |
 | Database | ClickHouse |
-| Frontend | WASM (Yew) |
+| Frontend | Static HTML + vanilla JS (`frontend/index.html`) |
 | Real-time | WebSockets |
 | Docker API | Bollard |
 
